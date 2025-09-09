@@ -1,8 +1,8 @@
 {
   "name": "yahtzee-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Yahtzee game server",
+  "main": "dist/app.js",
   "scripts": {
     "dev": "nodemon src/app.ts",
     "start": "ts-node dist/app.ts",

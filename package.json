@@ -1,0 +1,24 @@
+{
+  "name": "yahtzee-monorepo",
+  "version": "1.0.0",
+  "description": "Yahtzee game monorepo with client and server",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel --recursive dev",
+    "build": "pnpm --recursive build",
+    "install:all": "pnpm install",
+    "clean": "pnpm --recursive exec rm -rf node_modules && rm -rf node_modules",
+    "dev:app": "pnpm --filter yahtzeeapp dev",
+    "dev:server": "pnpm --filter yahtzee-server dev",
+    "build:app": "pnpm --filter yahtzeeapp build",
+    "build:server": "pnpm --filter yahtzee-server build"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.3"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "pnpm": ">=7.0.0"
+  },
+  "packageManager": "pnpm@8.15.0"
+}
