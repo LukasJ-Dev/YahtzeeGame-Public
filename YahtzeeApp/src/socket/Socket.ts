@@ -5,7 +5,7 @@ let SocketIO: Socket;
 
 export const connectToSocket = () => {
   if (!SocketIO)
-    SocketIO = io("https://yahztee-server.lukasj.dev", {
+    SocketIO = io("http://localhost:8080", {
       transports: ["websocket"],
     });
 };

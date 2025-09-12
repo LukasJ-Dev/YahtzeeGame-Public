@@ -1,214 +1,199 @@
 import { Lobby, Player, Dice, Score } from "./types";
-import {
-  Chance,
-  FourOfKind,
-  FullHouse,
-  LargeStraight,
-  NumberScoring,
-  Scoring,
-  SmallStraight,
-  ThreeOfKind,
-  Yahtzee,
-} from "./utils/Scoring";
-import { getRandomNumbers } from "./utils/random";
-
-const scoringRulesTable = [
-  new NumberScoring(1),
-  new NumberScoring(2),
-  new NumberScoring(3),
-  new NumberScoring(4),
-  new NumberScoring(5),
-  new NumberScoring(6),
-  new ThreeOfKind(),
-  new FourOfKind(),
-  new FullHouse(),
-  new SmallStraight(),
-  new LargeStraight(),
-  new Yahtzee(),
-  new Chance(),
-];
+import { GameSession, GamePlayer } from "./domain";
+import { GameRules } from "./domain/GameRules";
 
 export class Game {
-  private gameCode: string;
-  private gameStarted: boolean;
-  private lobbyPlayers?: Player[];
-  private players?: Player[];
-  private playerTurn: number = 0;
-  private diceRolled: number = 0;
+  private gameSession: GameSession;
 
   constructor(players: Player[], gameCode: string) {
-    this.lobbyPlayers = players;
-    this.gameCode = gameCode;
-    this.gameStarted = false;
+    // Convert legacy players to GamePlayers
+    const gamePlayers = players.map((player, index) =>
+      GamePlayer.fromLegacyPlayer(player, index)
+    );
+
+    // Create game session with host player
+    const hostPlayer = gamePlayers.find((p) => p.isHost()) || gamePlayers[0];
+    this.gameSession = new GameSession(gameCode, hostPlayer);
+
+    // Add remaining players
+    gamePlayers.forEach((player) => {
+      if (player !== hostPlayer) {
+        this.gameSession.addPlayer(player);
+      }
+    });
   }
 
+  // Game state queries
   hasGameStarted(): boolean {
-    return this.gameStarted;
+    return this.gameSession.hasGameStarted();
   }
 
   getPlayers(): Player[] {
-    if (this.gameStarted && this.players) return this.players;
-    return this.lobbyPlayers || [];
+    return this.gameSession
+      .getPlayers()
+      .map((player) => player.toLegacyPlayer());
   }
 
-  rollDice(): Dice[] {
-    if (!this.gameStarted || !this.players) return [];
-
-    if (this.diceRolled >= 3) return [];
-
-    const newDice = this.players[this.playerTurn].dices?.map((dice, i) => {
-      if (dice.locked) return dice;
-      return { value: Math.floor(Math.random() * 6) + 1, locked: false };
-    });
-
-    if (!newDice) return [];
-
-    this.players[this.playerTurn].dices = newDice;
-    this.diceRolled++;
-    return newDice;
-  }
-
-  lockDice(index: number) {
-    if (
-      !this.gameStarted ||
-      !this.players ||
-      this.playerTurn === undefined ||
-      this.diceRolled === 0
-    )
-      return [];
-    if (!this.players[this.playerTurn].dices![index]) return [];
-
-    this.players[this.playerTurn].dices![index].locked =
-      !this.players[this.playerTurn].dices![index].locked;
-
-    const newDice = this.players[this.playerTurn].dices;
-
-    if (!newDice) return [];
-
-    this.players[this.playerTurn].dices = newDice;
-    return newDice;
-  }
-
-  selectScore(rowIndex: number): Score[] {
-    if (!this.gameStarted || !this.players || this.playerTurn === undefined)
-      return [];
-
-    if (rowIndex > 13) return [];
-
-    const dices = this.players[this.playerTurn].dices;
-    if (!dices) return [];
-    const diceValues = dices.map((dices) => dices.value);
-    const calculatedScore = scoringRulesTable[rowIndex].getScores(diceValues);
-
-    this.players[this.playerTurn].scores = this.players[
-      this.playerTurn
-    ].scores?.map((score, index) => {
-      if (index === rowIndex)
-        return {
-          score: calculatedScore,
-          state: "SELECTED",
-        };
-      if (score.state === "SELECTED") return score;
-      return {
-        score: 0,
-        state: "DEFAULT",
-      };
-    });
-    const newScore = this.players[this.playerTurn].scores;
-    if (!newScore) return [];
-    this.prepareNext();
-    return newScore;
-  }
-
-  private prepareNext(): boolean {
-    if (!this.gameStarted || !this.players || this.playerTurn === undefined)
-      return false;
-    this.players[this.playerTurn].dices = this.players[
-      this.playerTurn
-    ].dices?.map((dice) => ({ value: dice.value, locked: false }));
-    this.diceRolled = 0;
-    this.playerTurn++;
-    if (this.playerTurn >= this.players.length) this.playerTurn = 0;
-    if (this.players[this.playerTurn].disconnected) {
-      return this.prepareNext();
-    }
-    return true;
-  }
-
-  skip(): boolean {
-    if (!this.gameStarted || !this.players || this.playerTurn === undefined)
-      return false;
-    if (this.diceRolled === 0) return false;
-    return this.prepareNext();
-  }
-
-  getPlayerTurn(): number | undefined {
-    return this.playerTurn;
+  getPlayerTurn(): number {
+    return this.gameSession.getPlayerTurn();
   }
 
   getPlayerByName(name: string): Player | undefined {
-    if (!this.players) return;
-    return this.players?.find((player) => player.name === name);
+    const gamePlayer = this.gameSession.getPlayerByName(name);
+    return gamePlayer ? gamePlayer.toLegacyPlayer() : undefined;
   }
 
-  disconnectPlayerInGame(leavingPlayer: Player) {
-    if (!this.gameStarted || !this.players) return;
-    this.players = this.players?.map((player) => {
-      if (player.name === leavingPlayer.name) {
-        return { ...player, disconnected: true };
-      }
-      return player;
-    });
+  // Game actions
+  rollDice(): Dice[] {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    if (!currentPlayer) {
+      throw new Error("No current player");
+    }
+
+    return this.gameSession.rollDice(currentPlayer.getName());
   }
 
-  addPlayer(player: Player) {
-    if (this.gameStarted) return;
+  lockDice(index: number): Dice[] {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    if (!currentPlayer) {
+      throw new Error("No current player");
+    }
 
-    this.lobbyPlayers?.push(player);
+    return this.gameSession.lockDice(currentPlayer.getName(), index);
   }
 
-  removePlayer(deletePlayer: Player) {
-    if (this.gameStarted) {
-      this.players = this.players?.filter(
-        (player) => player.name !== deletePlayer.name
+  selectScore(rowIndex: number): Score[] {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    if (!currentPlayer) {
+      throw new Error("No current player");
+    }
+
+    // Get current dice values
+    const diceValues = currentPlayer.getDices().map((dice) => dice.value);
+
+    // Calculate score using game rules
+    const scoreCalculation = GameRules.calculateScore(diceValues, rowIndex);
+
+    if (!scoreCalculation.isValid) {
+      throw new Error(
+        `Invalid score selection: ${scoreCalculation.description}`
       );
-      return this.players?.length;
-    } else {
-      this.lobbyPlayers = this.lobbyPlayers?.filter(
-        (player) => player.name !== deletePlayer.name
-      );
-      if (this.lobbyPlayers?.length === 0 || !this.lobbyPlayers) return 0;
-      if (deletePlayer.isHost) {
-        this.lobbyPlayers[0].isHost = true;
-      }
-      return this.lobbyPlayers.length;
+    }
+
+    return this.gameSession.selectScore(
+      currentPlayer.getName(),
+      rowIndex,
+      scoreCalculation.score
+    );
+  }
+
+  skip(): boolean {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    if (!currentPlayer) {
+      throw new Error("No current player");
+    }
+
+    try {
+      this.gameSession.skipTurn(currentPlayer.getName());
+      return true;
+    } catch (error) {
+      return false;
     }
   }
 
-  startGame() {
-    this.players = this.lobbyPlayers?.map((player, i) => ({
-      id: i,
-      name: player.name,
-      color: player.color,
-      dices: [
-        { value: 1, locked: false },
-        { value: 2, locked: false },
-        { value: 3, locked: false },
-        { value: 4, locked: false },
-        { value: 5, locked: false },
-      ],
-      scores: Array(13).fill({ score: 0, state: "DEFAULT" }),
-      disconnected: false,
-    }));
-    this.gameStarted = true;
-    this.playerTurn = 0;
-    this.diceRolled = 0;
+  // Player management
+  addPlayer(player: Player): void {
+    const gamePlayer = GamePlayer.fromLegacyPlayer(
+      player,
+      this.gameSession.getPlayers().length
+    );
+    this.gameSession.addPlayer(gamePlayer);
   }
 
+  removePlayer(deletePlayer: Player): number {
+    return this.gameSession.removePlayer(deletePlayer.name);
+  }
+
+  disconnectPlayerInGame(leavingPlayer: Player): void {
+    this.gameSession.disconnectPlayer(leavingPlayer.name);
+  }
+
+  // Game lifecycle
+  startGame(): void {
+    this.gameSession.startGame();
+  }
+
+  // Legacy compatibility
   getGame(): Lobby {
+    return this.gameSession.toLobby();
+  }
+
+  // Additional utility methods
+  getGameCode(): string {
+    return this.gameSession.getGameCode();
+  }
+
+  getCurrentPlayer(): Player | undefined {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    return currentPlayer ? currentPlayer.toLegacyPlayer() : undefined;
+  }
+
+  getGameState(): string {
+    return this.gameSession.getState().getState().phase;
+  }
+
+  getTurnPhase(): string {
+    return this.gameSession.getState().getState().turnPhase;
+  }
+
+  canRollDice(): boolean {
+    return this.gameSession.getState().canRollDice();
+  }
+
+  canSelectScore(): boolean {
+    return this.gameSession.getState().canSelectScore();
+  }
+
+  canSkipTurn(): boolean {
+    return this.gameSession.getState().canSkipTurn();
+  }
+
+  getDiceRollCount(): number {
+    return this.gameSession.getState().getState().diceRollCount;
+  }
+
+  // Get all possible scores for current dice
+  getPossibleScores(): { score: number; description: string }[] {
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    if (!currentPlayer) {
+      return [];
+    }
+
+    const diceValues = currentPlayer.getDices().map((dice) => dice.value);
+    return GameRules.calculateAllScores(diceValues).map((calc) => ({
+      score: calc.score,
+      description: calc.description,
+    }));
+  }
+
+  // Get game statistics
+  getGameStats(): {
+    totalPlayers: number;
+    connectedPlayers: number;
+    currentPlayer: string;
+    gamePhase: string;
+    turnPhase: string;
+  } {
+    const players = this.gameSession.getPlayers();
+    const currentPlayer = this.gameSession.getCurrentPlayer();
+    const state = this.gameSession.getState().getState();
+
     return {
-      gameCode: this.gameCode,
-      players: (this.gameStarted ? this.players : this.lobbyPlayers) || [],
+      totalPlayers: players.length,
+      connectedPlayers: players.filter((p) => p.isConnected()).length,
+      currentPlayer: currentPlayer?.getName() || "None",
+      gamePhase: state.phase,
+      turnPhase: state.turnPhase,
     };
   }
 }

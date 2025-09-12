@@ -16,7 +16,7 @@ app.use(
   })
 );
 
-const socketServer: SocketServer = new SocketServer(io);
+export const socketServer: SocketServer = new SocketServer(io);
 
 socketServer.start();
 
